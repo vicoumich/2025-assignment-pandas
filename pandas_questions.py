@@ -18,24 +18,33 @@ def load_data():
     import os
     current_dir = os.getcwd()
     data_dir = os.path.join(current_dir, 'data')
-    referendum_path = os.path.join(data_dir, "referundum.csv")
+    referendum_path = os.path.join(data_dir, "referendum.csv")
     regions_path = os.path.join(data_dir, "regions.csv")
     departments_path = os.path.join(data_dir, "departments.csv")
 
-    referendum = pd.read_csv(referendum_path)
-    regions = pd.read_csv(regions_path)
-    departments = pd.read_csv(departments_path)
+    referendum = pd.read_csv(
+        referendum_path, sep=';',
+        dtype={"Department code": str, "Town code": str})
+    regions = pd.read_csv(regions_path, sep=",", dtype={"code": str})
+    departments = pd.read_csv(
+        departments_path, sep=",",
+        dtype={"code": str, "region_code": str})
 
     return referendum, regions, departments
 
 
-def merge_regions_and_departments(regions: pd.DataFrame, departments: pd.DataFrame):
+def merge_regions_and_departments(
+        regions: pd.DataFrame,
+        departments: pd.DataFrame):
     """Merge regions and departments in one DataFrame.
 
     The columns in the final DataFrame should be:
     ['code_reg', 'name_reg', 'code_dep', 'name_dep']
     """
-    merged = pd.merge(departments, regions, left_on='region_code', right_on='code', how='inner')
+    merged = pd.merge(
+        departments, regions,
+        left_on='region_code', right_on='code',
+        how='inner')
 
     return merged.rename(columns={
         "code_x": "code_dep",
@@ -46,7 +55,7 @@ def merge_regions_and_departments(regions: pd.DataFrame, departments: pd.DataFra
 
 
 def merge_referendum_and_areas(
-        referendum: pd.DataFrame, 
+        referendum: pd.DataFrame,
         regions_and_departments: pd.DataFrame):
     """Merge referendum and regions_and_departments in one DataFrame.
 
@@ -56,12 +65,19 @@ def merge_referendum_and_areas(
     DOM-TOM-COM departments are departements that are remote from metropolitan
     France, like Guadaloupe, Reunion, or Tahiti.
     """
-    referendum_clean = referendum_and_areas.copy()[~referendum['Department code'].str.contains("Z")]
-    merged = pd.merge(
-        regions_and_departments, referendum_clean, 
-        left_on="Department code", right_on="code_dep", 
-        how='inner')
-    merged = merged.drop("Department code", axis=1)
+    ref = referendum[~referendum["Department code"].str.contains("Z")].copy()
+
+    def normalize_dep_code(code):
+        s = str(code)
+        if s in ["2A", "2B"]:
+            return s
+        if s.isdigit():
+            return f"{int(s):02d}"
+        return s
+
+    ref["code_dep"] = ref["Department code"].map(normalize_dep_code)
+
+    merged = regions_and_departments.merge(ref, on="code_dep", how="inner")
 
     return merged
 
@@ -74,10 +90,15 @@ def compute_referendum_result_by_regions(referendum_and_areas: pd.DataFrame):
     """
     result = (
         referendum_and_areas
-        .groupby(["code_reg", "name_reg"], as_index=True)[
-            ["Registered", "Abstentions", "Null", "Choice A", "Choice B"]
-        ]
-        .sum()
+        .groupby("code_reg", as_index=True)
+        .agg({
+            "name_reg": "first",
+            "Registered": "sum",
+            "Abstentions": "sum",
+            "Null": "sum",
+            "Choice A": "sum",
+            "Choice B": "sum",
+        })
     )
     return result
 
@@ -92,7 +113,27 @@ def plot_referendum_map(referendum_result_by_regions):
     * Return a gpd.GeoDataFrame with a column 'ratio' containing the results.
     """
 
-    return gpd.GeoDataFrame({})
+    import os
+
+    current_dir = os.getcwd()
+    data_dir = os.path.join(current_dir, "data")
+    regions_geo_path = os.path.join(data_dir, "regions.geojson")
+
+    regions_geo = gpd.read_file(regions_geo_path)
+
+    df = referendum_result_by_regions.reset_index()
+
+    gdf = regions_geo.merge(
+        df, left_on="code",
+        right_on="code_reg", how="left")
+
+    expressed = gdf["Choice A"] + gdf["Choice B"]
+    gdf["ratio"] = gdf["Choice A"] / expressed
+
+    gdf.plot(column="ratio", legend=True)
+    plt.tight_layout()
+
+    return gdf
 
 
 if __name__ == "__main__":
@@ -104,6 +145,7 @@ if __name__ == "__main__":
     referendum_and_areas = merge_referendum_and_areas(
         referendum, regions_and_departments
     )
+    print(referendum_and_areas.shape)
     referendum_results = compute_referendum_result_by_regions(
         referendum_and_areas
     )
