@@ -15,24 +15,39 @@ import matplotlib.pyplot as plt
 
 def load_data():
     """Load data from the CSV files referundum/regions/departments."""
-    referendum = pd.DataFrame({})
-    regions = pd.DataFrame({})
-    departments = pd.DataFrame({})
+    import os
+    current_dir = os.getcwd()
+    data_dir = os.path.join(current_dir, 'data')
+    referendum_path = os.path.join(data_dir, "referundum.csv")
+    regions_path = os.path.join(data_dir, "regions.csv")
+    departments_path = os.path.join(data_dir, "departments.csv")
+
+    referendum = pd.read_csv(referendum_path)
+    regions = pd.read_csv(regions_path)
+    departments = pd.read_csv(departments_path)
 
     return referendum, regions, departments
 
 
-def merge_regions_and_departments(regions, departments):
+def merge_regions_and_departments(regions: pd.DataFrame, departments: pd.DataFrame):
     """Merge regions and departments in one DataFrame.
 
     The columns in the final DataFrame should be:
     ['code_reg', 'name_reg', 'code_dep', 'name_dep']
     """
+    merged = pd.merge(departments, regions, left_on='region_code', right_on='code', how='inner')
 
-    return pd.DataFrame({})
+    return merged.rename(columns={
+        "code_x": "code_dep",
+        "name_x": "name_dep",
+        "code_y": "code_reg",
+        "name_y": "name_reg",
+    })[["code_reg", "name_reg", "code_dep", "name_dep"]]
 
 
-def merge_referendum_and_areas(referendum, regions_and_departments):
+def merge_referendum_and_areas(
+        referendum: pd.DataFrame, 
+        regions_and_departments: pd.DataFrame):
     """Merge referendum and regions_and_departments in one DataFrame.
 
     You can drop the lines relative to DOM-TOM-COM departments, and the
@@ -41,18 +56,30 @@ def merge_referendum_and_areas(referendum, regions_and_departments):
     DOM-TOM-COM departments are departements that are remote from metropolitan
     France, like Guadaloupe, Reunion, or Tahiti.
     """
+    referendum_clean = referendum_and_areas.copy()[~referendum['Department code'].str.contains("Z")]
+    merged = pd.merge(
+        regions_and_departments, referendum_clean, 
+        left_on="Department code", right_on="code_dep", 
+        how='inner')
+    merged = merged.drop("Department code", axis=1)
 
-    return pd.DataFrame({})
+    return merged
 
 
-def compute_referendum_result_by_regions(referendum_and_areas):
+def compute_referendum_result_by_regions(referendum_and_areas: pd.DataFrame):
     """Return a table with the absolute count for each region.
 
     The return DataFrame should be indexed by `code_reg` and have columns:
     ['name_reg', 'Registered', 'Abstentions', 'Null', 'Choice A', 'Choice B']
     """
-
-    return pd.DataFrame({})
+    result = (
+        referendum_and_areas
+        .groupby(["code_reg", "name_reg"], as_index=True)[
+            ["Registered", "Abstentions", "Null", "Choice A", "Choice B"]
+        ]
+        .sum()
+    )
+    return result
 
 
 def plot_referendum_map(referendum_result_by_regions):
